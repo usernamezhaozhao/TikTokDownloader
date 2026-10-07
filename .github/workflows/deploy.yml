@@ -27,7 +27,7 @@ on:
         description: "是否执行服务器部署（SSH）"
         type: boolean
         required: true
-        default: true
+        default: false
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -60,20 +60,26 @@ jobs:
         id: get-version
         run: |
           if [ "${{ github.event_name }}" = "release" ]; then
-            echo "VERSION=${{ github.event.release.tag_name }}" >> "$GITHUB_ENV"
-          elif [ -n "${{ github.event.inputs.custom_version }}" ]; then
-            echo "VERSION=${{ github.event.inputs.custom_version }}" >> "$GITHUB_ENV"
+            VERSION="${{ github.event.release.tag_name }}"
+          elif [ -n "${{ inputs.custom_version }}" ]; then
+            VERSION="${{ inputs.custom_version }}"
           else
-            VERSION=$(curl -s \
+            LATEST=$(curl -s \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               https://api.github.com/repos/${{ github.repository }}/releases/latest \
-              | jq -r '.tag_name')
-            echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+              | jq -r '.tag_name // empty')
+            if [ -n "$LATEST" ]; then
+              VERSION="$LATEST"
+            else
+              VERSION="0.0.0-dev"
+            fi
           fi
           if [ -z "$VERSION" ]; then
             echo "无法解析版本号" >&2
             exit 1
           fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "resolved version: $VERSION"
 
       - name: 生成镜像标签与部署标签
         id: tags
