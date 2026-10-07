@@ -9,8 +9,8 @@ async def main():
         try:
             await downloader.run()
         except (
-                KeyboardInterrupt,
-                CancelledError,
+            KeyboardInterrupt,
+            CancelledError,
         ):
             return
 

@@ -73,7 +73,9 @@ class SQLLogger(BaseSQLLogger):
         old_sheet = "_".join(mark)
         if await self.__check_sheet_exists(old_sheet):
             try:
-                await self.cursor.execute(self.UPDATE_SQL.format(old_name=old_sheet, new_name=new_sheet))
+                await self.cursor.execute(
+                    self.UPDATE_SQL.format(old_name=old_sheet, new_name=new_sheet)
+                )
             except OperationalError as e:
                 print(
                     Text(

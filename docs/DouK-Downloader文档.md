@@ -113,25 +113,25 @@ class Params(ABC):
 
     @abstractmethod
     def sign(
-            self,
-            url: str = "",
-            query: dict | str = "",
-            data: dict | str | None = None,
-            method: str = "",
-            user_agent: str = "",
-            ms_token: str = "",
+        self,
+        url: str = "",
+        query: dict | str = "",
+        data: dict | str | None = None,
+        method: str = "",
+        user_agent: str = "",
+        ms_token: str = "",
     ) -> dict[str, str]:
         raise NotImplementedError
 
     @abstractmethod
     def sign_url(
-            self,
-            url: str = "",
-            query: dict | str = "",
-            data: dict | str | None = None,
-            method: str = "",
-            user_agent: str = "",
-            ms_token: str = "",
+        self,
+        url: str = "",
+        query: dict | str = "",
+        data: dict | str | None = None,
+        method: str = "",
+        user_agent: str = "",
+        ms_token: str = "",
     ) -> str:
         raise NotImplementedError
 
