@@ -112,3 +112,12 @@ docstring-code-line-length = "dynamic"
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+# 让 pytest 把仓库根目录加入 sys.path，保证 `from src.xxx` 在 CI 中可解析
+pythonpath = ["."]
+testpaths = ["src/testers"]
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py 中的导入通常为包级公开 API 的 re-export，忽略 F401
+"__init__.py" = ["F401"]

@@ -7,7 +7,8 @@ from emoji import replace_emoji
 try:
     from ..translation import _
 except ImportError:
-    _ = lambda x: x
+    def _(x):
+        return x
 
 __all__ = ["Cleaner"]
 

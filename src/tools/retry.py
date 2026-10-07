@@ -29,7 +29,7 @@ class Retry:
         async def inner(*args, **kwargs):
             if r := await function(*args, **kwargs):
                 return r
-            for _ in range(RETRY):
+            for __ in range(RETRY):
                 if r := await function(*args, **kwargs):
                     return r
                 await wait()
