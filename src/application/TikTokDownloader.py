@@ -22,6 +22,8 @@ from src.custom import (
     VERSION_MAJOR,
     VERSION_MINOR,
     VOLUME,
+    env_text,
+    unattended,
 )
 from src.manager import Database, DownloadRecorder
 from src.module import Cookie, MigrateFolder
@@ -83,7 +85,12 @@ class TikTokDownloader:
     async def read_config(self):
         self.config = self.__format_config(await self.database.read_config_data())
         self.option = self.__format_config(await self.database.read_option_data())
-        self.set_language(self.option["Language"])
+        self.set_language(self.__language())
+
+    def __language(self) -> str:
+        """界面语言优先级：环境变量 DOUK_LANGUAGE > 数据库配置"""
+        language = env_text("DOUK_LANGUAGE")
+        return language if language in ("zh_CN", "en_US") else self.option["Language"]
 
     @staticmethod
     def __format_config(config: list) -> dict:
@@ -187,14 +194,21 @@ class TikTokDownloader:
 
     async def disclaimer(self):
         if not self.config["Disclaimer"]:
-            await self.__init_language()
-            self.console.print(_(DISCLAIMER_TEXT), style=MASTER)
-            if self.console.input(
-                _("是否已仔细阅读上述免责声明(YES/NO): ")
-            ).upper() not in ("Y", "YES"):
-                return False
-            await self.database.update_config_data("Disclaimer", 1)
-            self.console.print()
+            if unattended():
+                self.config["Disclaimer"] = 1
+                await self.database.update_config_data("Disclaimer", 1)
+                self.console.info(
+                    _("无人值守模式：已自动确认免责声明，跳过语言选择与交互确认！"),
+                )
+            else:
+                await self.__init_language()
+                self.console.print(_(DISCLAIMER_TEXT), style=MASTER)
+                if self.console.input(
+                    _("是否已仔细阅读上述免责声明(YES/NO): ")
+                ).upper() not in ("Y", "YES"):
+                    return False
+                await self.database.update_config_data("Disclaimer", 1)
+                self.console.print()
         return True
 
     async def __init_language(self):
@@ -415,7 +429,7 @@ class TikTokDownloader:
             self.cookie,
             logger=self.logger,
             console=self.console,
-            **self.settings.read(),
+            **self.__settings_data(),
             recorder=self.recorder,
         )
         MigrateFolder(self.parameter).compatible()
@@ -425,8 +439,31 @@ class TikTokDownloader:
         )
         # await self.parameter.update_params_offline()
         if not restart:
-            self.run_command = self.parameter.run_command.copy()
+            self.run_command = self.__run_command()
         self.parameter.CLEANER.set_rule(TEXT_REPLACEMENT, True)
+
+    def __settings_data(self) -> dict:
+        """配置文件内容，允许环境变量覆盖，覆盖结果不写回磁盘"""
+        data = dict(self.settings.read())
+        for name, key in (
+            ("DOUK_COOKIE", "cookie"),
+            ("DOUK_COOKIE_TIKTOK", "cookie_tiktok"),
+            ("DOUK_RUN_COMMAND", "run_command"),
+        ):
+            if value := env_text(name):
+                data[key] = value
+        return data
+
+    def __run_command(self) -> list:
+        """启动模式优先级：配置文件 > 无人值守默认值"""
+        if self.parameter.run_command:
+            return self.parameter.run_command.copy()
+        if unattended():
+            self.console.info(
+                _("无人值守模式：未指定运行模式，默认启动 Web API 模式！"),
+            )
+            return ["7"]
+        return []
 
     async def run(self):
         self.project_info()

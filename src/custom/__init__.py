@@ -5,6 +5,11 @@ from .function import (
     suspend,
     is_valid_token,
 )
+from .environment import (
+    env_flag,
+    env_text,
+    unattended,
+)
 from .internal import (
     DISCLAIMER_TEXT,
     ROOT,

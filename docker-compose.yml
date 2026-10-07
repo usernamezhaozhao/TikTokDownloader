@@ -1,0 +1,24 @@
+# DouK-Downloader 无人值守部署示例
+# 启动后不进行任何交互式提问，默认直接进入 Web API 模式（端口 5555）
+services:
+  douk:
+    build: .
+    # 也可以直接使用镜像：image: usernamezhaozhao/tiktok-downloader:latest
+    container_name: douk
+    restart: unless-stopped
+    environment:
+      # 无人值守模式，取值 1/0
+      DOUK_UNATTENDED: "1"
+      # 启动后的菜单命令，7 为 Web API 模式；留空则使用配置文件或默认值
+      DOUK_RUN_COMMAND: "7"
+      # 界面语言，可选 zh_CN / en_US
+      DOUK_LANGUAGE: "zh_CN"
+      # Cookie 建议通过 .env 或密钥管理注入，优先级高于 Volume/settings.json
+      DOUK_COOKIE: "${DOUK_COOKIE:-}"
+      DOUK_COOKIE_TIKTOK: "${DOUK_COOKIE_TIKTOK:-}"
+    volumes:
+      # 配置、数据库、下载文件都在这里，必须持久化
+      - ./Volume:/app/Volume
+    ports:
+      # 生产环境建议只绑定回环地址，或前置反向代理做认证
+      - "5555:5555"

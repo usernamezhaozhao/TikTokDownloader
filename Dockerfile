@@ -43,6 +43,10 @@ COPY static /app/static
 COPY license /app/license
 COPY main.py /app/main.py
 
+# 无人值守模式：跳过语言选择、免责声明确认与菜单输入
+# 可通过 -e DOUK_UNATTENDED=0 恢复官方交互行为
+ENV DOUK_UNATTENDED=1
+
 # 暴露端口
 EXPOSE 5555
 
