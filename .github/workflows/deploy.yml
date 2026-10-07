@@ -74,6 +74,8 @@ jobs:
               VERSION="0.0.0-dev"
             fi
           fi
+          # 清理浏览器表单可能带入的换行/回车
+          VERSION="$(printf '%s' "$VERSION" | tr -d '\r\n')"
           if [ -z "$VERSION" ]; then
             echo "无法解析版本号" >&2
             exit 1
@@ -84,17 +86,17 @@ jobs:
       - name: 生成镜像标签与部署标签
         id: tags
         run: |
-          if [ "${{ github.event.inputs.is_beta }}" = "true" ]; then
-            # 开发版：在最新补丁号 +1 后追加 -dev
-            BASE="${{ env.VERSION }}"
-            DEV="${BASE%.*}.$(( ${BASE##*.} + 1 ))}-dev"
+          if [ "${{ inputs.is_beta }}" = "true" ]; then
+            # 开发版：在版本号后追加 -dev
+            DEV="${{ env.VERSION }}-dev"
             echo "VERSION=$DEV" >> "$GITHUB_ENV"
+            echo "DEPLOY_TAG=$DEV" >> "$GITHUB_OUTPUT"
             TAGS="${{ env.DOCKER_REPO }}:${DEV},${{ env.GHCR_REPO }}:${DEV}"
           else
+            echo "DEPLOY_TAG=${{ env.VERSION }}" >> "$GITHUB_OUTPUT"
             TAGS="${{ env.DOCKER_REPO }}:${{ env.VERSION }},${{ env.DOCKER_REPO }}:latest,${{ env.GHCR_REPO }}:${{ env.VERSION }},${{ env.GHCR_REPO }}:latest"
           fi
           echo "TAGS=$TAGS" >> "$GITHUB_ENV"
-          echo "DEPLOY_TAG=${{ env.VERSION }}" >> "$GITHUB_OUTPUT"
 
       - name: 设置 QEMU
         uses: docker/setup-qemu-action@v4
