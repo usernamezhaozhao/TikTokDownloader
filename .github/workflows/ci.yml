@@ -1,0 +1,78 @@
+# CI：每次 push / PR 自动执行「代码检查 → 单元测试 → Docker 构建校验」
+# 作用：在合并或发布前守住质量底线，避免破坏性代码流入 master/develop。
+name: CI (Build & Test)
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+
+# 同一分支/PR 的新 push 会取消仍在运行的旧流水线，节省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 1. 代码静态检查（ruff） ───────────────────────────────
+  lint:
+    name: Lint (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 签出存储库
+        uses: actions/checkout@v7
+
+      - name: 设置 uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+
+      - name: 代码格式检查
+        run: uvx ruff format --check .
+
+      - name: 静态 lint 检查
+        run: uvx ruff check .
+
+  # ── 2. 单元测试（矩阵覆盖 3.12 / 3.13） ──────────────────
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: 签出存储库
+        uses: actions/checkout@v7
+
+      - name: 设置 uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+
+      - name: 同步依赖（含 dev 组，提供 pytest）
+        run: |
+          uv python install ${{ matrix.python-version }}
+          uv sync --frozen --python ${{ matrix.python-version }}
+
+      - name: 运行单元测试
+        run: uv run pytest src/testers -v
+
+  # ── 3. Docker 镜像构建校验（不推送，确保 Dockerfile 可用） ──
+  docker-build:
+    name: Docker Build (validate)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 签出存储库
+        uses: actions/checkout@v7
+
+      - name: 构建镜像以校验 Dockerfile 与构建上下文
+        run: docker build -t douk-downloader:ci .
+
+      - name: 冒烟测试：容器可启动并打印入口
+        run: |
+          # 仅验证镜像能拉起 Python 解释器与依赖导入，不进入交互式菜单
+          docker run --rm douk-downloader:ci python -c "import main; print('import main OK')"

@@ -1,0 +1,162 @@
+# 部署流水线：构建并推送多架构 Docker 镜像，再通过 SSH 部署到目标服务器。
+# 触发方式：
+#   1. 发布 Release（published）→ 自动构建对应版本标签并部署
+#   2. 手动 workflow_dispatch → 可选「开发版(dev)」或指定版本，并可选择是否执行服务器部署
+#
+# 与现有工作流的关系：
+#   本文件已涵盖「Release_docker_image.yml」的镜像构建/推送能力，并额外补上真正的部署步骤。
+#   建议：启用本工作流后，停用/删除 Release_docker_image.yml 与 Manually_docker_image.yml，避免重复推送。
+name: Deploy
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      is_beta:
+        description: "是否构建开发版（追加 -dev 后缀）"
+        type: boolean
+        required: true
+        default: true
+      custom_version:
+        description: "手动指定版本号（留空则取最新 Release）"
+        type: string
+        required: false
+        default: ""
+      deploy:
+        description: "是否执行服务器部署（SSH）"
+        type: boolean
+        required: true
+        default: true
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  DOCKER_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/tiktok-downloader
+  GHCR_REPO: ghcr.io/${{ secrets.DOCKERHUB_USERNAME }}/tiktok-downloader
+
+jobs:
+  build-and-push:
+    name: 构建并推送镜像
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_tag: ${{ steps.tags.outputs.DEPLOY_TAG }}
+    steps:
+      - name: 签出存储库
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: 计算目标版本标签
+        id: get-version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "VERSION=${{ github.event.release.tag_name }}" >> "$GITHUB_ENV"
+          elif [ -n "${{ github.event.inputs.custom_version }}" ]; then
+            echo "VERSION=${{ github.event.inputs.custom_version }}" >> "$GITHUB_ENV"
+          else
+            VERSION=$(curl -s \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/releases/latest \
+              | jq -r '.tag_name')
+            echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "无法解析版本号" >&2
+            exit 1
+          fi
+
+      - name: 生成镜像标签与部署标签
+        id: tags
+        run: |
+          if [ "${{ github.event.inputs.is_beta }}" = "true" ]; then
+            # 开发版：在最新补丁号 +1 后追加 -dev
+            BASE="${{ env.VERSION }}"
+            DEV="${BASE%.*}.$(( ${BASE##*.} + 1 ))}-dev"
+            echo "VERSION=$DEV" >> "$GITHUB_ENV"
+            TAGS="${{ env.DOCKER_REPO }}:${DEV},${{ env.GHCR_REPO }}:${DEV}"
+          else
+            TAGS="${{ env.DOCKER_REPO }}:${{ env.VERSION }},${{ env.DOCKER_REPO }}:latest,${{ env.GHCR_REPO }}:${{ env.VERSION }},${{ env.GHCR_REPO }}:latest"
+          fi
+          echo "TAGS=$TAGS" >> "$GITHUB_ENV"
+          echo "DEPLOY_TAG=${{ env.VERSION }}" >> "$GITHUB_OUTPUT"
+
+      - name: 设置 QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并推送多架构镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ env.TAGS }}
+          provenance: false
+          sbom: false
+
+  deploy:
+    name: 部署到服务器
+    needs: build-and-push
+    # 手动触发时按 inputs.deploy 决定是否部署；Release 触发时始终部署
+    if: >-
+      ${{ github.event_name == 'release' ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true') }}
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_IMAGE: ghcr.io/${{ secrets.DOCKERHUB_USERNAME }}/tiktok-downloader:${{ needs.build-and-push.outputs.deploy_tag }}
+    steps:
+      - name: 通过 SSH 拉取新镜像并重建容器
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          script: |
+            set -e
+            # 1. 登录 GHCR（使用具备 pull 权限的 PAT 或复用部署令牌）
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin || true
+
+            # 2. 拉取刚刚推送的镜像
+            docker pull ${{ env.DEPLOY_IMAGE }}
+
+            # 3. 以与 docker-compose.yml 一致的参数重建容器
+            docker stop douk || true
+            docker rm douk || true
+            docker run -d \
+              --name douk \
+              --restart unless-stopped \
+              -p 5555:5555 \
+              -v douk_volume:/app/Volume \
+              -e DOUK_UNATTENDED=1 \
+              -e DOUK_RUN_COMMAND=7 \
+              -e DOUK_LANGUAGE=zh_CN \
+              ${{ env.DEPLOY_IMAGE }}
+
+            # 4. 清理悬空镜像，避免磁盘占满
+            docker image prune -f
